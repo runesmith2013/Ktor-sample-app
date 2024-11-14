@@ -1,37 +1,89 @@
 package com.example.plugins
 
+
+import com.example.model.Priority
+import com.example.model.Task
+import com.example.model.TaskRepository
+import com.example.model.tasksAsTable
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.http.content.*
+import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import io.ktor.server.plugins.statuspages.*
-
-import kotlin.IllegalStateException
+import java.util.*
 
 fun Application.configureRouting() {
     routing {
 
-        staticResources("/content", "myContent")
+        staticResources("/task-ui", "task-ui")
 
-        install(StatusPages) {
-            exception<IllegalStateException> { call, cause ->
-                call.respondText("App in illegal state as ${cause.message}", status = HttpStatusCode.InternalServerError)
+        route("/tasks") {
+            get {
+                val tasks = TaskRepository.allTasks()
+                call.respondText(
+                    contentType = ContentType.Text.Html,
+                    text = tasks.tasksAsTable()
+                )
             }
-        }
 
-        get("/") {
-            call.respondText("Hello World!")
-        }
+            get("/byPriority/{priority}") {
 
-        get ("/hello") {
-            val text = "<h1>Hello ktor!</h1>!"
-            val type = ContentType.Text.Html
-            call.respondText(text, type)
-        }
+                val priorityAsText = call.parameters["priority"]
+                if (priorityAsText == null) {
+                    call.respond(HttpStatusCode.BadRequest)
+                    return@get
+                }
 
-        get("/error-test") {
-            throw IllegalStateException("Too busy")
+                try {
+                    val priority = Priority.valueOf(priorityAsText)
+                    val tasks = TaskRepository.tasksByPriority(priority)
+
+                    if (tasks.isEmpty()) {
+                        call.respond(HttpStatusCode.NotFound)
+                        return@get
+                    }
+
+                    call.respondText(
+                        contentType = ContentType.Text.Html,
+                        text = tasks.tasksAsTable()
+                    )
+                } catch (ex: IllegalArgumentException) {
+                    call.respond(HttpStatusCode.BadRequest)
+                }
+
+            }
+
+            post {
+                val formContent = call.receiveParameters()
+
+                val params = Triple(
+                    formContent["name"] ?: "",
+                    formContent["description"] ?: "",
+                    formContent["priority"] ?: ""
+
+                )
+
+                if (params.toList().any() { it.isEmpty() }) {
+                    call.respond(HttpStatusCode.BadRequest)
+                    return@post
+                }
+
+                try {
+                    val priority = Priority.valueOf(params.third.uppercase(Locale.getDefault()))
+                    TaskRepository.addTask(
+                        Task(params.first, params.second, priority)
+                    )
+
+                    call.respond(HttpStatusCode.NoContent)
+
+                } catch (ex: IllegalArgumentException) {
+                    call.respond(HttpStatusCode.BadRequest)
+                } catch (ex: IllegalStateException) {
+                    call.respond(HttpStatusCode.BadRequest)
+                }
+
+            }
         }
 
     }
